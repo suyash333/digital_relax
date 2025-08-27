@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.digitalrelax"
+    namespace = "com.golearnsap.digitalrelax"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.digitalrelax"
+        applicationId = "com.golearnsap.digitalrelax"
         minSdk = 29
         targetSdk = 36
         versionCode = 1
