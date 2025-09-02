@@ -1,4 +1,3 @@
-
 package com.golearnsap.digitalrelax
 
 import android.app.NotificationManager
@@ -16,29 +15,48 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.Button
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.golearnsap.digitalrelax.ui.theme.DigitalRelaxTheme
+import kotlinx.coroutines.launch
 
-enum class Screen {
-    Main,
-    About
+enum class Screen(val title: String, val icon: ImageVector) {
+    Main("Home", Icons.Filled.Home),
+    About("About", Icons.Filled.Info)
 }
 
 class MainActivity : ComponentActivity() {
@@ -49,8 +67,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var prefs: SharedPreferences
     private val PREFS_NAME = "DigitalRelaxPrefs"
+    private val KEY_APP_THEME = "app_theme"
 
-    // To manage system controls during break
     private fun updateBreakSystemControls(context: Context, isBreakStarting: Boolean) {
         val notificationManager = context.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (notificationManager.isNotificationPolicyAccessGranted) {
@@ -65,7 +83,7 @@ class MainActivity : ComponentActivity() {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             try {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-                    startLockTask() // Pin the screen
+                    startLockTask()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -76,15 +94,16 @@ class MainActivity : ComponentActivity() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             try {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-                    stopLockTask() // Unpin the screen
+                    stopLockTask()
                 }
             } catch (e: Exception) {
-                // Log or handle exception if stopLockTask fails
+                // Log or handle exception
             }
         }
     }
 
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -108,7 +127,16 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            DigitalRelaxTheme {
+            val savedTheme = prefs.getString(KEY_APP_THEME, "system") ?: "system"
+            var currentThemeChoice by rememberSaveable { mutableStateOf(savedTheme) }
+
+            val useDarkTheme = if (currentThemeChoice == "dark") {
+                true
+            } else {
+                isSystemInDarkTheme()
+            }
+
+            DigitalRelaxTheme(darkTheme = useDarkTheme) {
                 var currentScreen by rememberSaveable { mutableStateOf(Screen.Main) }
                 var inBreak by rememberSaveable { mutableStateOf(false) }
                 var remainingTime by rememberSaveable { mutableLongStateOf(0L) }
@@ -116,12 +144,15 @@ class MainActivity : ComponentActivity() {
                 var targetEndTimeMillis by rememberSaveable(key = "targetEndTimeMillis") { mutableLongStateOf(0L) }
                 val context = LocalContext.current
 
+                val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+                val scope = rememberCoroutineScope()
+
                 LaunchedEffect(Unit, targetEndTimeMillis) {
                     if (targetEndTimeMillis > 0) {
                         val currentTime = System.currentTimeMillis()
                         val newRemainingMillis = targetEndTimeMillis - currentTime
                         if (newRemainingMillis > 0) {
-                            inBreak = true // Ensure break screen is shown
+                            inBreak = true
                             remainingTime = newRemainingMillis / 1000L
                             startTimer(
                                 durationMillis = newRemainingMillis,
@@ -135,14 +166,13 @@ class MainActivity : ComponentActivity() {
                                     targetEndTimeMillis = 0L
                                 }
                             )
-                            // Re-apply system controls if break is restored
                             if (!checkNotificationPolicyAccess(context)) {
                                 requestNotificationPolicyAccess(context)
                             } else {
                                 updateBreakSystemControls(context, true)
                             }
-                        } else { // Break time has passed while inactive
-                            if (inBreak) { // Only if a break was considered active
+                        } else {
+                            if (inBreak) {
                                 updateBreakSystemControls(context, false)
                                 playDingSound()
                                 showCompletionToast()
@@ -154,82 +184,109 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (inBreak) {
-                    DigitalBreakScreen(
-                        modifier = Modifier.fillMaxSize(),
-                        timeRemaining = remainingTime
-                    )
-                } else {
-                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                        when (currentScreen) {
-                            Screen.Main -> {
-                                Column(
-                                    modifier = Modifier
-                                        .padding(innerPadding)
-                                        .fillMaxSize()
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(16.dp),
-                                    verticalArrangement = Arrangement.Center,
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("Select break duration:", style = MaterialTheme.typography.titleMedium)
-                                    Spacer(Modifier.height(8.dp))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(onClick = { selectedDurationMinutes = "1" }) { Text("1 min") }
-                                        Button(onClick = { selectedDurationMinutes = "5" }) { Text("5 min") }
-                                        Button(onClick = { selectedDurationMinutes = "10" }) { Text("10 min") }
-                                    }
-                                    Spacer(Modifier.height(16.dp))
-                                    OutlinedTextField(
-                                        value = selectedDurationMinutes,
-                                        onValueChange = { selectedDurationMinutes = it },
-                                        label = { Text("Custom duration (minutes)") },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                    )
-                                    Spacer(Modifier.height(24.dp))
-                                    Button(onClick = {
-                                        val duration = selectedDurationMinutes.toLongOrNull()?.times(60000L)
-                                        if (duration != null && duration > 0) {
-                                            if (checkNotificationPolicyAccess(context)) {
-                                                updateBreakSystemControls(context, true)
-                                                inBreak = true
-                                                targetEndTimeMillis = System.currentTimeMillis() + duration
-                                                remainingTime = duration / 1000L // Initial display
-                                                startTimer(
-                                                    durationMillis = duration,
-                                                    onTick = { millisUntilFinished -> remainingTime = millisUntilFinished / 1000 },
-                                                    onFinish = {
-                                                        updateBreakSystemControls(context, false)
-                                                        playDingSound()
-                                                        showCompletionToast()
-                                                        inBreak = false
-                                                        remainingTime = 0L
-                                                        targetEndTimeMillis = 0L
-                                                    }
-                                                )
-                                            } else {
-                                                requestNotificationPolicyAccess(context)
-                                            }
-                                        } else {
-                                            Toast.makeText(context, "Please enter a valid duration.", Toast.LENGTH_SHORT).show()
+                ModalNavigationDrawer(
+                    drawerState = drawerState,
+                    drawerContent = {
+                        AppDrawer(
+                            currentScreen = currentScreen,
+                            onNavigate = { screen ->
+                                currentScreen = screen
+                                scope.launch { drawerState.close() }
+                            },
+                            isDarkModeForced = currentThemeChoice == "dark",
+                            onForceDarkModeChanged = { isChecked ->
+                                val newTheme = if (isChecked) "dark" else "system"
+                                currentThemeChoice = newTheme
+                                prefs.edit().putString(KEY_APP_THEME, newTheme).apply()
+                            }
+                        )
+                    }
+                ) {
+                    if (inBreak) {
+                        DigitalBreakScreen(
+                            modifier = Modifier.fillMaxSize(),
+                            timeRemaining = remainingTime
+                        )
+                    } else {
+                        Scaffold(
+                            modifier = Modifier.fillMaxSize(),
+                            topBar = {
+                                TopAppBar(
+                                    title = { Text(currentScreen.title) },
+                                    navigationIcon = {
+                                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                            Icon(Icons.Filled.Menu, contentDescription = "Open navigation drawer")
                                         }
-                                    }) {
-                                        Text("Start Break")
                                     }
-                                    Spacer(Modifier.height(16.dp))
-                                    Button(onClick = { currentScreen = Screen.About }) {
-                                        Text("About App")
+                                )
+                            }
+                        ) { innerPadding ->
+                            when (currentScreen) {
+                                Screen.Main -> {
+                                    Column(
+                                        modifier = Modifier
+                                            .padding(innerPadding)
+                                            .fillMaxSize()
+                                            .verticalScroll(rememberScrollState())
+                                            .padding(16.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text("Select break duration:", style = MaterialTheme.typography.titleMedium)
+                                        Spacer(Modifier.height(8.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(onClick = { selectedDurationMinutes = "1" }) { Text("1 min") }
+                                            Button(onClick = { selectedDurationMinutes = "5" }) { Text("5 min") }
+                                            Button(onClick = { selectedDurationMinutes = "10" }) { Text("10 min") }
+                                        }
+                                        Spacer(Modifier.height(16.dp))
+                                        OutlinedTextField(
+                                            value = selectedDurationMinutes,
+                                            onValueChange = { selectedDurationMinutes = it },
+                                            label = { Text("Custom duration (minutes)") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                        )
+                                        Spacer(Modifier.height(24.dp))
+                                        Button(onClick = {
+                                            val duration = selectedDurationMinutes.toLongOrNull()?.times(60000L)
+                                            if (duration != null && duration > 0) {
+                                                if (checkNotificationPolicyAccess(context)) {
+                                                    updateBreakSystemControls(context, true)
+                                                    inBreak = true
+                                                    targetEndTimeMillis = System.currentTimeMillis() + duration
+                                                    remainingTime = duration / 1000L
+                                                    startTimer(
+                                                        durationMillis = duration,
+                                                        onTick = { millisUntilFinished -> remainingTime = millisUntilFinished / 1000 },
+                                                        onFinish = {
+                                                            updateBreakSystemControls(context, false)
+                                                            playDingSound()
+                                                            showCompletionToast()
+                                                            inBreak = false
+                                                            remainingTime = 0L
+                                                            targetEndTimeMillis = 0L
+                                                        }
+                                                    )
+                                                } else {
+                                                    requestNotificationPolicyAccess(context)
+                                                }
+                                            } else {
+                                                Toast.makeText(context, "Please enter a valid duration.", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }) {
+                                            Text("Start Break")
+                                        }
+                                        Spacer(Modifier.weight(1f)) // Pushes content towards top if Column not Centered
+                                        // Theme settings UI removed from here
                                     }
                                 }
-                            }
-                            Screen.About -> {
-                                AboutAppScreen(
-                                    modifier = Modifier
-                                        .padding(innerPadding)
-                                        .fillMaxSize() // Ensure AboutAppScreen can fill if needed
-                                        .verticalScroll(rememberScrollState()),
-                                    onBack = { currentScreen = Screen.Main }
-                                )
+                                Screen.About -> {
+                                    AboutAppScreen(
+                                        modifier = Modifier
+                                            .padding(innerPadding)
+                                            .fillMaxSize()
+                                            .verticalScroll(rememberScrollState())
+                                    )
+                                }
                             }
                         }
                     }
@@ -260,9 +317,6 @@ class MainActivity : ComponentActivity() {
         context.startActivity(intent)
     }
 
-    // setDndMode is now part of updateBreakSystemControls
-    // private fun setDndMode(context: Context, enabled: Boolean) { ... }
-
     private fun startTimer(durationMillis: Long, onTick: (Long) -> Unit, onFinish: () -> Unit) {
         countDownTimer?.cancel()
         countDownTimer = object : CountDownTimer(durationMillis, 1000) {
@@ -281,7 +335,6 @@ class MainActivity : ComponentActivity() {
         soundPool?.release()
         soundPool = null
 
-        // Best effort to clean up system states
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
                 stopLockTask()
@@ -289,7 +342,6 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) { /* Silently ignore */ }
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Reset DND if it was on (check current state to avoid unnecessary calls)
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (notificationManager.isNotificationPolicyAccessGranted &&
             notificationManager.currentInterruptionFilter == NotificationManager.INTERRUPTION_FILTER_PRIORITY) {
@@ -299,28 +351,67 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun AboutAppScreen(modifier: Modifier = Modifier, onBack: () -> Unit) {
+fun AppDrawer(
+    currentScreen: Screen,
+    onNavigate: (Screen) -> Unit,
+    isDarkModeForced: Boolean,
+    onForceDarkModeChanged: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ModalDrawerSheet(modifier) {
+        Spacer(Modifier.height(12.dp))
+        Screen.values().forEach { screen ->
+            NavigationDrawerItem(
+                icon = { Icon(screen.icon, contentDescription = null) },
+                label = { Text(screen.title) },
+                selected = currentScreen == screen,
+                onClick = { onNavigate(screen) },
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(NavigationDrawerItemDefaults.ItemPadding)
+                .padding(horizontal = 8.dp), // Adjust padding to align with NavigationDrawerItems
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Always Use Dark Mode",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Switch(
+                checked = isDarkModeForced,
+                onCheckedChange = onForceDarkModeChanged
+            )
+        }
+    }
+}
+
+@Composable
+fun AboutAppScreen(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier // Apply the passed-in modifier (includes padding & scroll)
-            .padding(16.dp), // Additional content padding
+        modifier = modifier
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text("Digital Relax", style = MaterialTheme.typography.headlineSmall)
-        Text("Version 1.0.0", style = MaterialTheme.typography.bodyMedium)
+        Text("Version 1.2", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(16.dp))
         Text("This app helps you take short breaks to relax.", style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(24.dp))
-        Button(onClick = onBack) {
-            Text("Back")
-        }
     }
 }
 
 @Composable
 fun DigitalBreakScreen(modifier: Modifier = Modifier, timeRemaining: Long) {
     Box(
-        modifier = modifier // Will be Modifier.fillMaxSize() from the call site
+        modifier = modifier
             .background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
@@ -340,7 +431,6 @@ fun DefaultPreview() {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("Select break duration:", style = MaterialTheme.typography.titleMedium)
@@ -350,17 +440,7 @@ fun DefaultPreview() {
                 Button(onClick = { }) { Text("5 min") }
                 Button(onClick = { }) { Text("10 min") }
             }
-            Spacer(Modifier.height(16.dp))
-            OutlinedTextField(
-                value = "5",
-                onValueChange = { },
-                label = { Text("Custom duration (minutes)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-            )
-            Spacer(Modifier.height(24.dp))
-            Button(onClick = { }) { Text("Start Break") }
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = { }) { Text("About App") }
+            // Theme settings preview removed from here
         }
     }
 }
@@ -377,6 +457,21 @@ fun BreakScreenPreview() {
 @Composable
 fun AboutAppScreenPreview() {
     DigitalRelaxTheme {
-        AboutAppScreen(onBack = {})
+        AboutAppScreen(Modifier.fillMaxSize())
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Preview(showBackground = true)
+@Composable
+fun AppDrawerPreview() {
+    DigitalRelaxTheme {
+        AppDrawer(
+            currentScreen = Screen.Main,
+            onNavigate = {},
+            isDarkModeForced = false,
+            onForceDarkModeChanged = {}
+        )
+    }
+}
+
